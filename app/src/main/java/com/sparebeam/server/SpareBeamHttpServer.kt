@@ -12,31 +12,62 @@ import org.json.JSONObject
 import java.net.URLEncoder
 
 class SpareBeamHttpServer(private val context: Context) : NanoHTTPD("0.0.0.0", 8080) {
+    private val access = PairingAccess(context)
     override fun serve(session: IHTTPSession): Response {
         val path = runCatching { URLDecoder.decode(session.uri, "UTF-8") }.getOrDefault("/")
-        if (path == "/") return newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", INDEX)
-        if (path == "/api/list") return newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", listing())
+        if (path == "/") return secure(newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", context.assets.open("index.html").bufferedReader().use { it.readText() }))
+        if (path == "/api/auth" && session.method == Method.POST) return authenticate(session)
+        if (!access.isAuthorized(session.headers["cookie"].orEmpty())) return secure(newFixedLengthResponse(Response.Status.UNAUTHORIZED, "text/plain; charset=utf-8", "Pair this browser with the code shown in SpareBeam."))
+        if (path == "/api/list") return secure(newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", listing()))
         if (path.startsWith("/media/")) {
             val parts = path.removePrefix("/media/").split('/', limit = 2)
-            val index = parts.firstOrNull()?.toIntOrNull() ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
-            val root = SharedFolders.list(context).getOrNull(index) ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
+            val index = parts.firstOrNull()?.toIntOrNull() ?: return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
+            val root = SharedFolders.list(context).getOrNull(index) ?: return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
             val target = parts.getOrNull(1).orEmpty()
-            val uri = resolve(root, target) ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
+            val uri = resolve(root, target) ?: return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
             val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
-            val length = runCatching { context.contentResolver.openAssetFileDescriptor(uri, "r")?.length ?: -1L }.getOrDefault(-1L)
+            val length = runCatching { context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L }.getOrDefault(-1L)
             val range = session.headers["range"]?.let { RangeRequest.parse(it, length) }
-            if (range is RangeRequest.Invalid) return newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, "text/plain", "Invalid range")
+            if (range is RangeRequest.Invalid) return secure(newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, "text/plain", "Invalid range").also { if (length >= 0) it.addHeader("Content-Range", "bytes */$length") })
             val start = (range as? RangeRequest.Valid)?.start ?: 0L
             val count = (range as? RangeRequest.Valid)?.length ?: length
-            val input = context.contentResolver.openInputStream(uri) ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
-            input.skip(start)
+            val input = context.contentResolver.openInputStream(uri) ?: return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
+            if (!skipFully(input, start)) { input.close(); return secure(newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Unable to seek media")) }
             val status = if (range is RangeRequest.Valid) Response.Status.PARTIAL_CONTENT else Response.Status.OK
-            val response = newFixedLengthResponse(status, mime, LimitedInputStream(input, count), count)
+            val response = if (count >= 0) newFixedLengthResponse(status, mime, LimitedInputStream(input, count), count) else newChunkedResponse(status, mime, input)
             response.addHeader("Accept-Ranges", "bytes")
             if (range is RangeRequest.Valid && length >= 0) response.addHeader("Content-Range", "bytes ${range.start}-${range.end}/$length")
-            return response
+            return secure(response)
         }
-        return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
+        return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
+    }
+    private fun authenticate(session: IHTTPSession): Response {
+        val body = HashMap<String, String>()
+        return try {
+            session.parseBody(body)
+            val pin = JSONObject(body["postData"].orEmpty()).optString("pin").take(16)
+            val token = access.pair(pin)
+            if (token == null) secure(newFixedLengthResponse(Response.Status.UNAUTHORIZED, "application/json", "{\"error\":\"Invalid code or temporarily locked\"}"))
+            else secure(newFixedLengthResponse(Response.Status.OK, "application/json", "{\"paired\":true}").also {
+                it.addHeader("Set-Cookie", "sparebeam_session=$token; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200")
+            })
+        } catch (_: Exception) {
+            secure(newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Invalid request\"}"))
+        }
+    }
+    private fun secure(response: Response): Response = response.apply {
+        addHeader("X-Content-Type-Options", "nosniff")
+        addHeader("X-Frame-Options", "DENY")
+        addHeader("Referrer-Policy", "no-referrer")
+        addHeader("Cache-Control", "no-store")
+    }
+    private fun skipFully(input: InputStream, count: Long): Boolean {
+        var remaining = count
+        while (remaining > 0) {
+            val skipped = input.skip(remaining)
+            if (skipped > 0) remaining -= skipped else if (input.read() >= 0) remaining-- else return false
+        }
+        return true
     }
     private fun listing(): String {
         val result = JSONArray()
@@ -81,5 +112,4 @@ class SpareBeamHttpServer(private val context: Context) : NanoHTTPD("0.0.0.0", 8
         override fun read(): Int { if (remaining <= 0) return -1; val b = super.read(); if (b >= 0) remaining--; return b }
         override fun read(b: ByteArray, off: Int, len: Int): Int { if (remaining <= 0) return -1; val n = super.read(b, off, minOf(len.toLong(), remaining).toInt()); if (n > 0) remaining -= n; return n }
     }
-    companion object { private val INDEX = """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>SpareBeam</title><style>body{font:16px system-ui;background:#111715;color:#f4f7f5;max-width:900px;margin:40px auto;padding:0 20px}a{color:#8cf5cc}.item{padding:14px;border-bottom:1px solid #34413b}video,audio,img{max-width:100%;margin-top:10px}</style><h1>SpareBeam</h1><p>Your media on your network.</p><main id="files">Loading…</main><script>fetch('/api/list').then(r=>r.json()).then(data=>{files.innerHTML=data.map(f=>`<div class="item"><a href="${'$'}{f.url}">${'$'}{f.name}</a>${'$'}{f.type.startsWith('video/')?`<video controls src="${'$'}{f.url}"></video>`:f.type.startsWith('audio/')?`<audio controls src="${'$'}{f.url}"></audio>`:f.type.startsWith('image/')?`<img src="${'$'}{f.url}">`:''}</div>`).join('')}).catch(()=>files.textContent='Could not load media.')</script>""" }
 }
