@@ -48,7 +48,7 @@ There is no prebuilt APK release yet. Build and install the debug app from this 
    adb install -r app/build/outputs/apk/debug/app-debug.apk
    ```
 
-The same build and unit-test tasks run in GitHub Actions for pull requests and pushes to `main`.
+GitHub Actions also boots an Android emulator to run the app smoke tests. The workflow uploads the debug APK as a seven-day Actions artifact after the automated checks pass.
 
 ## Use SpareBeam
 
@@ -72,7 +72,7 @@ The browser session expires after 12 hours. Stopping and restarting the server a
 
 ## Test the app
 
-Run the automated checks from the project folder:
+Run the build and unit tests from the project folder:
 
 ```sh
 gradle assembleDebug testDebugUnitTest
@@ -87,6 +87,8 @@ Then test on a physical phone and a second device:
 5. Cancel the media picker and confirm no additional item is copied.
 6. Stop the server and confirm the media is no longer available; restart and pair again.
 7. Restart the phone and confirm the imported folders and copies remain in SpareBeam.
+
+The Android emulator smoke tests cover the home screen, private-folder creation, selected-file copying, and rejection of paths outside the private media directory. The emulator cannot fully replace a real-device check of Wi-Fi discovery, system picker differences, and playback on a separate browser device.
 
 ## Troubleshooting
 
