@@ -16,6 +16,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.sparebeam.storage.ImportedMediaStore
 import com.sparebeam.storage.SharedFolders
 import com.sparebeam.server.MediaServerService
 import com.sparebeam.server.PairingAccess
@@ -35,6 +41,13 @@ class MainActivity : ComponentActivity() {
 private fun SpareBeamHome() {
     val context = LocalContext.current
     var folders by remember { mutableStateOf(SharedFolders.list(context)) }
+    var importedFolders by remember { mutableStateOf(ImportedMediaStore.folders(context)) }
+    var showCreateFolder by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+    var pendingImportFolder by remember { mutableStateOf<String?>(null) }
+    var importStatus by remember { mutableStateOf<String?>(null) }
+    var copying by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val running by MediaServerService.running.collectAsState()
     val serverError by MediaServerService.errorMessage.collectAsState()
     val addFolder = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -42,6 +55,20 @@ private fun SpareBeamHome() {
             context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             SharedFolders.add(context, it)
             folders = SharedFolders.list(context)
+        }
+    }
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(100)) { uris ->
+        val targetFolder = pendingImportFolder
+        pendingImportFolder = null
+        if (!uris.isNullOrEmpty() && targetFolder != null) {
+            copying = true
+            importStatus = "Copying ${uris.size} selected item(s)…"
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { ImportedMediaStore.copyInto(context, targetFolder, uris) }
+                importedFolders = ImportedMediaStore.folders(context)
+                copying = false
+                importStatus = "Copied ${result.copied} item(s) to $targetFolder${if (result.failed > 0) "; ${result.failed} could not be copied" else ""}."
+            }
         }
     }
     Surface(Modifier.fillMaxSize()) {
@@ -59,7 +86,7 @@ private fun SpareBeamHome() {
                         val action = if (running) MediaServerService.ACTION_STOP else MediaServerService.ACTION_START
                         val serviceIntent = Intent(context, MediaServerService::class.java).setAction(action)
                         if (running) context.startService(serviceIntent) else context.startForegroundService(serviceIntent)
-                    }, modifier = Modifier.fillMaxWidth().height(52.dp), enabled = running || folders.isNotEmpty()) {
+                    }, modifier = Modifier.fillMaxWidth().height(52.dp), enabled = running || folders.isNotEmpty() || importedFolders.isNotEmpty()) {
                         Text(if (running) "Stop server" else "Start server")
                     }
                 }
@@ -77,7 +104,30 @@ private fun SpareBeamHome() {
                         TextButton(onClick = { SharedFolders.remove(context, uri); folders = SharedFolders.list(context) }) { Text("Remove") }
                     })
                 }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 14.dp)) {
+                        Text("SpareBeam folders", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { newFolderName = ""; showCreateFolder = true }) { Text("+ Create folder") }
+                    }
+                    Text("Copies stay in SpareBeam’s private storage. Only media you select is copied; originals are unchanged.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (importedFolders.isEmpty()) item {
+                    Text("Create a folder, then choose Add photos/videos. Your copies appear in the browser library whenever the server is running.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 10.dp))
+                }
+                items(importedFolders, key = { "private:${it.name}" }) { folder ->
+                    ListItem(
+                        headlineContent = { Text(folder.name) },
+                        supportingContent = { Text("${folder.fileCount} copied item(s) · stored in SpareBeam") },
+                        trailingContent = {
+                            TextButton(enabled = !copying, onClick = {
+                                pendingImportFolder = folder.name
+                                pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                            }) { Text("Add photos/videos") }
+                        }
+                    )
+                }
             }
+            importStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp)) }
             if (running) Text("Open ${MediaServerService.address(context) ?: "http://<phone-ip>:8080"} on another device on this Wi-Fi.", style = MaterialTheme.typography.bodySmall)
             if (running) {
                 Spacer(Modifier.height(12.dp))
@@ -90,5 +140,30 @@ private fun SpareBeamHome() {
                 }
             }
         }
+    }
+    if (showCreateFolder) {
+        AlertDialog(
+            onDismissRequest = { showCreateFolder = false },
+            title = { Text("Create a SpareBeam folder") },
+            text = {
+                Column {
+                    Text("This folder is private to SpareBeam. You’ll choose which photos or videos to copy into it.")
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, label = { Text("Folder name") }, singleLine = true)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val created = ImportedMediaStore.createFolder(context, newFolderName)
+                    if (created == null) importStatus = "Choose a valid folder name."
+                    else {
+                        importedFolders = ImportedMediaStore.folders(context)
+                        importStatus = "Folder created. Add photos or videos when you’re ready."
+                        showCreateFolder = false
+                    }
+                }) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = { showCreateFolder = false }) { Text("Cancel") } }
+        )
     }
 }

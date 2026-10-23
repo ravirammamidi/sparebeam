@@ -3,8 +3,12 @@ package com.sparebeam.server
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.webkit.MimeTypeMap
+import com.sparebeam.storage.ImportedMediaStore
 import com.sparebeam.storage.SharedFolders
 import fi.iki.elonen.NanoHTTPD
+import java.io.File
+import java.io.FileInputStream
 import java.io.InputStream
 import java.net.URLDecoder
 import org.json.JSONArray
@@ -20,6 +24,11 @@ class SpareBeamHttpServer(private val context: Context, wifiAddress: String) : N
         if (path == "/api/auth" && session.method == Method.POST) return authenticate(session)
         if (!access.isAuthorized(session.headers["cookie"].orEmpty())) return secure(newFixedLengthResponse(Response.Status.UNAUTHORIZED, "text/plain; charset=utf-8", "Pair this browser with the code shown in SpareBeam."))
         if (path == "/api/list") return secure(newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", listing()))
+        if (path.startsWith("/local-media/")) {
+            val file = ImportedMediaStore.fileForRequest(context, path.removePrefix("/local-media/"))
+                ?: return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
+            return streamFile(file, session)
+        }
         if (path.startsWith("/media/")) {
             val parts = path.removePrefix("/media/").split('/', limit = 2)
             val index = parts.firstOrNull()?.toIntOrNull() ?: return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"))
@@ -73,7 +82,28 @@ class SpareBeamHttpServer(private val context: Context, wifiAddress: String) : N
     private fun listing(): String {
         val result = JSONArray()
         SharedFolders.list(context).forEachIndexed { index, root -> walk(root, "", index, result, 0) }
+        ImportedMediaStore.files(context).forEach { (file, relative) ->
+            if (result.length() >= 2000) return@forEach
+            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "application/octet-stream"
+            val url = "/local-media/${relative.split('/').joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }}"
+            result.put(JSONObject().put("name", file.name).put("type", mime).put("url", url))
+        }
         return result.toString()
+    }
+    private fun streamFile(file: File, session: IHTTPSession): Response {
+        val length = file.length()
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "application/octet-stream"
+        val range = session.headers["range"]?.let { RangeRequest.parse(it, length) }
+        if (range is RangeRequest.Invalid) return secure(newFixedLengthResponse(Response.Status.RANGE_NOT_SATISFIABLE, "text/plain", "Invalid range").also { it.addHeader("Content-Range", "bytes */$length") })
+        val start = (range as? RangeRequest.Valid)?.start ?: 0L
+        val count = (range as? RangeRequest.Valid)?.length ?: length
+        val input = runCatching { FileInputStream(file) }.getOrElse { return secure(newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")) }
+        if (!skipFully(input, start)) { input.close(); return secure(newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Unable to seek media")) }
+        val status = if (range is RangeRequest.Valid) Response.Status.PARTIAL_CONTENT else Response.Status.OK
+        val response = newFixedLengthResponse(status, mime, LimitedInputStream(input, count), count)
+        response.addHeader("Accept-Ranges", "bytes")
+        if (range is RangeRequest.Valid) response.addHeader("Content-Range", "bytes ${range.start}-${range.end}/$length")
+        return secure(response)
     }
     private fun walk(root: Uri, relative: String, index: Int, out: JSONArray, depth: Int) {
         if (depth > 12 || out.length() >= 2000) return
