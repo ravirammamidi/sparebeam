@@ -11,7 +11,7 @@ sealed interface RangeRequest {
             val first = pair[0].toLongOrNull()
             val last = pair[1].toLongOrNull()
             val start = first ?: if (last != null && last > 0) (size - last).coerceAtLeast(0) else return Invalid
-            val end = (last ?: size - 1).coerceAtMost(size - 1)
+            val end = (if (first == null) size - 1 else last ?: size - 1).coerceAtMost(size - 1)
             return if (start < 0 || start >= size || end < start) Invalid else Valid(start, end)
         }
     }
