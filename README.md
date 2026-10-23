@@ -48,7 +48,7 @@ There is no prebuilt APK release yet. Build and install the debug app from this 
    adb install -r app/build/outputs/apk/debug/app-debug.apk
    ```
 
-GitHub Actions also boots an Android emulator to run the app smoke tests. The workflow uploads the debug APK as a seven-day Actions artifact after the automated checks pass.
+GitHub Actions builds the app, compiles the Android instrumentation tests, runs unit tests, and uploads the debug APK as a seven-day Actions artifact. The hosted emulator has been unreliable, so instrumentation tests are not currently executed in CI.
 
 ## Use SpareBeam
 
@@ -78,6 +78,12 @@ Run the build and unit tests from the project folder:
 gradle assembleDebug testDebugUnitTest
 ```
 
+To compile the instrumentation tests as well:
+
+```sh
+gradle assembleDebugAndroidTest
+```
+
 Then test on a physical phone and a second device:
 
 1. Create a SpareBeam folder and copy in one photo and one video. Confirm the originals are unchanged and the copied-item count updates.
@@ -88,7 +94,13 @@ Then test on a physical phone and a second device:
 6. Stop the server and confirm the media is no longer available; restart and pair again.
 7. Restart the phone and confirm the imported folders and copies remain in SpareBeam.
 
-The Android emulator smoke tests cover the home screen, private-folder creation, selected-file copying, and rejection of paths outside the private media directory. The emulator cannot fully replace a real-device check of Wi-Fi discovery, system picker differences, and playback on a separate browser device.
+The instrumentation smoke tests cover the home screen, private-folder creation, selected-file copying, and rejection of paths outside the private media directory. Run them on an emulator or Android device with:
+
+```sh
+gradle connectedDebugAndroidTest
+```
+
+A real-device check is still needed for Wi-Fi access from a separate browser device, system picker behavior, and media playback.
 
 ## Troubleshooting
 
