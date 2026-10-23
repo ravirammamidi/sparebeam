@@ -16,7 +16,14 @@ class MediaServerService : Service() {
         if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
         createChannel()
         startForeground(NOTIFICATION_ID, NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_upload).setContentTitle("SpareBeam is running").setContentText("Sharing selected folders on your local Wi-Fi").setOngoing(true).build())
-        runCatching { if (server == null) { server = SpareBeamHttpServer(this).also { it.start(5_000, false) }; errorMessage.value = null; running.value = true } }
+        runCatching {
+            if (server == null) {
+                val wifiIp = wifiAddress(this) ?: error("Wi-Fi address unavailable")
+                server = SpareBeamHttpServer(this, wifiIp).also { it.start(5_000, false) }
+                errorMessage.value = null
+                running.value = true
+            }
+        }
             .onFailure {
                 running.value = false
                 errorMessage.value = "Could not start the media server. Check Wi-Fi and try again."
@@ -34,10 +41,11 @@ class MediaServerService : Service() {
         private const val NOTIFICATION_ID = 1
         val running = MutableStateFlow(false)
         val errorMessage = MutableStateFlow<String?>(null)
-        fun address(context: Context): String? = runCatching {
+        private fun wifiAddress(context: Context): String? = runCatching {
             val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val ip = Formatter.formatIpAddress(wifi.connectionInfo.ipAddress)
-            if (ip == "0.0.0.0") null else "http://$ip:8080"
+            if (ip == "0.0.0.0") null else ip
         }.getOrNull()
+        fun address(context: Context): String? = wifiAddress(context)?.let { "http://$it:8080" }
     }
 }
