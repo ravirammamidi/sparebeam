@@ -4,7 +4,7 @@
 
 ## Current status
 
-This first implementation slice establishes the Android app, folder selection through Android's Storage Access Framework, foreground service lifecycle, an embedded HTTP server, and range parsing for seeking. The browser library and end-to-end validation are still in progress.
+The app supports folder selection through Android's Storage Access Framework, a foreground service, and a browser media library with HTTP range streaming for seeking. Browsers must pair with the six-digit code shown on the host phone. Pairing creates an HttpOnly same-site session cookie; sessions expire after 12 hours and repeated incorrect codes trigger a short lockout.
 
 ## Build
 
@@ -13,12 +13,11 @@ Open this project in Android Studio (Android Gradle Plugin 8.7.3, JDK 17, Androi
 ## Privacy and safety
 
 - Folders are selected explicitly by the user and use persisted URI access.
-- The server binds to the local network on port 8080 and exposes read-only media routes.
+- The server binds to the local network on port 8080 and exposes read-only media routes only to paired browsers.
 - There are no accounts, ads, cloud services, or remote deletion features.
-- Do not forward the local server address outside your trusted network.
+- Traffic uses HTTP on the local network; use SpareBeam only on a trusted Wi-Fi network and do not forward its address outside that network.
 
 ## Known limitations
 
-- Pairing/PIN protection is not implemented yet; use only on a trusted home Wi-Fi network.
-- Android device testing is required for foreground-service behavior and SAF compatibility.
+- Android device testing is still required for foreground-service behavior, pairing in mobile browsers, and SAF compatibility.
 - The web library currently lists common files and relies on browser-native playback; device/browser format support varies.

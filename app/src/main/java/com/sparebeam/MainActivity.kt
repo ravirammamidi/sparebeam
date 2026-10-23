@@ -1,7 +1,6 @@
 package com.sparebeam
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sparebeam.storage.SharedFolders
 import com.sparebeam.server.MediaServerService
+import com.sparebeam.server.PairingAccess
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,7 +35,8 @@ class MainActivity : ComponentActivity() {
 private fun SpareBeamHome() {
     val context = LocalContext.current
     var folders by remember { mutableStateOf(SharedFolders.list(context)) }
-    var running by remember { mutableStateOf(MediaServerService.isRunning) }
+    val running by MediaServerService.running.collectAsState()
+    val serverError by MediaServerService.errorMessage.collectAsState()
     val addFolder = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let {
             context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -58,12 +59,12 @@ private fun SpareBeamHome() {
                         val action = if (running) MediaServerService.ACTION_STOP else MediaServerService.ACTION_START
                         val serviceIntent = Intent(context, MediaServerService::class.java).setAction(action)
                         if (running) context.startService(serviceIntent) else context.startForegroundService(serviceIntent)
-                        running = !running
                     }, modifier = Modifier.fillMaxWidth().height(52.dp), enabled = running || folders.isNotEmpty()) {
                         Text(if (running) "Stop server" else "Start server")
                     }
                 }
             }
+            serverError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
             Spacer(Modifier.height(28.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text("Shared folders", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
@@ -78,6 +79,16 @@ private fun SpareBeamHome() {
                 }
             }
             if (running) Text("Open ${MediaServerService.address(context) ?: "http://<phone-ip>:8080"} on another device on this Wi-Fi.", style = MaterialTheme.typography.bodySmall)
+            if (running) {
+                Spacer(Modifier.height(12.dp))
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Pairing code", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(PairingAccess.pairingCode(context), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Enter this code in the browser on a device you trust.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
     }
 }

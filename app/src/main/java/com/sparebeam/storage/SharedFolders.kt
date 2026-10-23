@@ -7,7 +7,7 @@ import android.provider.DocumentsContract
 object SharedFolders {
     private const val PREFS = "shared_folders"
     private const val KEY = "uris"
-    fun list(context: Context): List<Uri> = context.getSharedPreferences(PREFS, 0).getStringSet(KEY, emptySet()).orEmpty().mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+    fun list(context: Context): List<Uri> = context.getSharedPreferences(PREFS, 0).getStringSet(KEY, emptySet()).orEmpty().sorted().mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
     fun add(context: Context, uri: Uri) {
         val prefs = context.getSharedPreferences(PREFS, 0)
         prefs.edit().putStringSet(KEY, prefs.getStringSet(KEY, emptySet()).orEmpty().toMutableSet().apply { add(uri.toString()) }).apply()
