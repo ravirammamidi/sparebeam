@@ -11,7 +11,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 
-class SpareBeamHttpServer(private val context: Context) : NanoHTTPD("0.0.0.0", 8080) {
+/** Listens only on the host phone's Wi-Fi interface, never on every network interface. */
+class SpareBeamHttpServer(private val context: Context, wifiAddress: String) : NanoHTTPD(wifiAddress, 8080) {
     private val access = PairingAccess(context)
     override fun serve(session: IHTTPSession): Response {
         val path = runCatching { URLDecoder.decode(session.uri, "UTF-8") }.getOrDefault("/")
