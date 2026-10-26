@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.net.wifi.WifiManager
 import android.text.format.Formatter
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -25,6 +26,7 @@ class MediaServerService : Service() {
             }
         }
             .onFailure {
+                Log.e("SpareBeamServer", "Could not start media server", it)
                 running.value = false
                 errorMessage.value = "Could not start the media server. Check Wi-Fi and try again."
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -45,7 +47,7 @@ class MediaServerService : Service() {
             val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val ip = Formatter.formatIpAddress(wifi.connectionInfo.ipAddress)
             if (ip == "0.0.0.0") null else ip
-        }.getOrNull()
+        }.onFailure { Log.e("SpareBeamServer", "Could not read Wi-Fi address", it) }.getOrNull()
         fun address(context: Context): String? = wifiAddress(context)?.let { "http://$it:8080" }
     }
 }

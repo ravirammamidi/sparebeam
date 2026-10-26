@@ -23,7 +23,8 @@ object ImportedMediaStore {
         val name = rawName.trim()
         if (name.isBlank() || name.length > 80 || name == "." || name == ".." || name.any { it == '/' || it == '\\' || it.isISOControl() }) return null
         val folder = File(root(context), name)
-        return if (folder.isDirectory || folder.mkdir()) name else null
+        if (folder.isDirectory) return name
+        return if (folder.mkdir()) { LibraryRevision.changed(); name } else null
     }
 
     fun copyInto(context: Context, folderName: String, sources: List<Uri>): CopyResult {
@@ -49,6 +50,7 @@ object ImportedMediaStore {
                 copied++
             }.onFailure { failed++ }
         }
+        if (copied > 0) LibraryRevision.changed()
         return CopyResult(copied, failed)
     }
 

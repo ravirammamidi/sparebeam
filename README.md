@@ -56,7 +56,7 @@ GitHub Actions builds the app, compiles the Android instrumentation tests, runs 
 
 Choose either or both methods in the app:
 
-**Share an existing folder:** Tap **Add folder** and choose a folder in Android's file picker. SpareBeam gets read-only access to that folder and its contents. Files stay in their original location.
+**Share an existing folder:** Tap **Link folder** and choose a folder in Android's file picker. SpareBeam gets read-only access to that folder and its contents. Files stay in their original location.
 
 **Copy selected photos or videos into SpareBeam:** Tap **Create folder**, enter a name, then tap **Add photos/videos** next to that folder. Choose the items in Android's media picker. SpareBeam copies only those selected items into its private app storage; it does not change the originals. These copies use space on the phone and are removed if the app is uninstalled or its data is cleared.
 
@@ -107,7 +107,7 @@ A real-device check is still needed for Wi-Fi access from a separate browser dev
 - **Start server is unavailable:** Add at least one existing folder or create a SpareBeam folder first, and make sure Wi-Fi is connected.
 - **The browser cannot connect:** Use the exact address shown in SpareBeam and check that both devices are on the same Wi-Fi. Guest networks may prevent devices from reaching each other. SpareBeam uses port `8080`.
 - **Pairing is rejected:** Recheck the six-digit code on the host phone. Repeated incorrect attempts trigger a 60-second lockout.
-- **New imports do not show in an already-open browser:** Refresh the browser page to reload the media list.
+- **New imports do not show in an already-open browser:** Use **Refresh library** to rescan immediately. Repeat browser visits reuse an in-memory listing for up to five seconds; phone-side imports and folder changes invalidate it immediately.
 - **A file does not play:** Browser playback depends on the file format and the browser/device support.
 - **The address changes after switching networks:** Stop and start the server again to bind to the phone's current Wi-Fi address.
 
@@ -116,7 +116,9 @@ A real-device check is still needed for Wi-Fi access from a separate browser dev
 - Folder access is granted only after the user chooses a folder. Existing shared folders are read-only.
 - Android's media picker gives SpareBeam access to the photos and videos the user selects, rather than the whole media library.
 - Imported copies stay in the app's private storage. SpareBeam does not upload media to a cloud service.
-- The server listens on the phone's current Wi-Fi IPv4 address, not every network interface. Browser access requires pairing; media routes are read-only.
+- The server listens on the phone's current Wi-Fi IPv4 address, not every network interface. Browser access requires pairing.
+- Browser media access is read-only: GET and HEAD can browse, stream, and download files. Upload, edit, rename, and delete requests are rejected by the server. Imports and folder management are available only in the Android app.
+- Pairing is the only POST route. It accepts small JSON requests from the app's origin; arbitrary uploads and multipart requests are rejected. Shared documents are downloaded rather than executed as web pages, and the browser uses a restrictive Content Security Policy.
 - Traffic uses HTTP, so media and session cookies are not encrypted from someone monitoring the same network. Use a trusted Wi-Fi network and do not forward the address outside it.
 - Stop the server when sharing is finished. Do not use SpareBeam on a public or untrusted Wi-Fi network.
 
